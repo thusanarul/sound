@@ -11,6 +11,11 @@ const c = @cImport({
     @cInclude("CoreFoundation/CoreFoundation.h");
 });
 
+const sampleRate = 44100.0;
+
+const freq = 440.0;
+var phase: f64 = 0.0;
+
 fn audioRenderCallback(
     // Custom data that you provided when registering your callback with the audio unit.
     inRefCon: ?*anyopaque,
@@ -29,8 +34,20 @@ fn audioRenderCallback(
     _ = ioActionFlags; // autofix
     _ = inTimeStamp; // autofix
     _ = inBusNumber; // autofix
-    _ = inNumberFrames; // autofix
-    _ = ioData; // autofix
+
+    const buffer = &ioData.*.mBuffers[0];
+
+    const alignedPtr: *f32 = @alignCast(@ptrCast(buffer.mData.?));
+    const samplePtr: [*]f32 = @ptrCast(alignedPtr);
+    const samples = samplePtr[0..inNumberFrames];
+
+    for (samples) |*sample| {
+        sample.* = @floatCast(std.math.sin(phase) * 0.2);
+        phase += 2.0 * std.math.pi * freq / sampleRate;
+        if (phase >= 2.0) {
+            phase -= 2.0 * std.math.pi;
+        }
+    }
 
     return 0;
 }
@@ -59,14 +76,14 @@ pub fn main() !void {
     }
 
     var audioInstance: c.AudioComponentInstance = null;
-    c.AudioComponentInstanceNew(comp, &audioInstance);
+    _ = c.AudioComponentInstanceNew(comp, &audioInstance);
 
     if (audioInstance == null) {
         std.debug.print("Could not create audio instance", .{});
         return;
     }
 
-    defer c.AudioComponentInstanceDispose(audioInstance);
+    defer _ = c.AudioComponentInstanceDispose(audioInstance);
 
     const input = c.AURenderCallbackStruct{ .inputProc = audioRenderCallback, .inputProcRefCon = null };
 
@@ -76,19 +93,58 @@ pub fn main() !void {
         c.kAudioUnitScope_Input,
         0,
         &input,
-        @sizeOf(input),
+        @sizeOf(@TypeOf(input)),
     ) != 0) {
-        std.debug.print("Could set property on audio unit", .{});
+        std.debug.print("Could not set property on audio unit", .{});
         return;
     }
 
-    var streamDesc = c.AudioStreamBasicDescription{};
-    _ = streamDesc; // autofix
+    var streamDesc = c.AudioStreamBasicDescription{
+        // An identifier specifying the general audio data format in the stream.
+        .mFormatID = c.kAudioFormatLinearPCM,
+        // Format-specific flags to specify details of the format.
+        .mFormatFlags = c.kAudioFormatFlagIsFloat | c.kAudioFormatFlagIsPacked,
+        // The number of frames per second of the data in the stream, when playing the stream at normal speed.
+        .mSampleRate = sampleRate,
+        // The number of bits for one audio sample.
+        .mBitsPerChannel = 32,
+        // The number of bytes from the start of one frame to the start of the next frame in an audio buffer.
+        .mBytesPerFrame = 4,
+        // The number of channels in each frame of audio data.
+        .mChannelsPerFrame = 1,
+        // The number of bytes in a packet of audio data.
+        .mBytesPerPacket = 4,
+        // The number of frames in a packet of audio data.
+        .mFramesPerPacket = 1,
+        // The amount to pad the structure to force an even 8-byte alignment.
+        .mReserved = 0,
+    };
+
+    if (c.AudioUnitSetProperty(
+        audioInstance,
+        c.kAudioUnitProperty_StreamFormat,
+        c.kAudioUnitScope_Input,
+        0,
+        &streamDesc,
+        @sizeOf(@TypeOf(streamDesc)),
+    ) != 0) {
+        std.debug.print("Could not set stream basic description on audio unit", .{});
+        return;
+    }
 
     if (c.AudioUnitInitialize(audioInstance) != 0) {
-        std.debug.print("Could initialize audio unit", .{});
+        std.debug.print("Could not initialize audio unit", .{});
         return;
     }
 
-    std.time.sleep(30 * std.time.ns_per_s);
+    if (c.AudioOutputUnitStart(audioInstance) != 0) {
+        std.debug.print("Could not start audio unit", .{});
+        return;
+    }
+
+    std.debug.print("Playing.. Press Cmd+C to stop", .{});
+
+    while (true) {
+        std.time.sleep(1 * std.time.ns_per_s);
+    }
 }
