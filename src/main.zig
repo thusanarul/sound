@@ -43,8 +43,13 @@ fn audioRenderCallback(
 
     for (samples) |*sample| {
         sample.* = @floatCast(std.math.sin(phase) * 0.2);
+        // Move phase with angular velocity.
+        // 2 * PI * freq to figure out radians/second. Hz expresses rotations pr second. 2*PI radians is one full cycle of a rotation.
+        // Divide by sampleRate because this is the rate of samples we are outputting each second. So we divide by this number because we want to figure out the phase increment for one sample.
         phase += 2.0 * std.math.pi * freq / sampleRate;
-        if (phase >= 2.0) {
+
+        // If phase is bigger than 2*PI, wrap it around. This is because we do not want phase to grow very large. Sin is periodic every 2*PI...
+        if (phase >= 2.0 * std.math.pi) {
             phase -= 2.0 * std.math.pi;
         }
     }
@@ -142,9 +147,10 @@ pub fn main() !void {
         return;
     }
 
-    std.debug.print("Playing.. Press Cmd+C to stop", .{});
+    std.debug.print("Playing.. Press Cmd+C to stop\n", .{});
 
     while (true) {
         std.time.sleep(1 * std.time.ns_per_s);
+        std.debug.print("Phase: {}\n", .{phase});
     }
 }
